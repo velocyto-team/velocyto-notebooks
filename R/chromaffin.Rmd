@@ -1,0 +1,167 @@
+---
+title: "Chromaffin  differentiation analysis"
+output: html_notebook
+---
+
+The notebook shows anlaysis of a SMART-seq2 dataset, where we start with per-cell bam files.
+It shows how to estimate gene-relative velocity (with different pooling options), as well as how to estimate gene-relative velocity.
+
+## Data loading
+
+Load the velocyto package:
+```{r}
+library(velocyto.R)
+```
+
+Load the data and genome annotations:
+
+(this block will note evalaute by default, as it takes a while)
+```{r eval=FALSE}
+# if you want to run this, please download bam files (and genes.refFlat) from
+# http://pklab.med.harvard.edu/velocyto/chromaffin/bams.tar
+# and extract it ("tar xvf bams.tar") in the working directory.
+# note: the file is fairly large - 5.6 GB! 
+path <- "data/e12.5.bams"
+files <- system(paste('find',path,'-name "*unique.bam" -print'),intern=T)
+names(files) <- gsub(".*\\/(.*)_unique.bam","\\1",files)
+# parse gene annotation, annotate bam file reads
+dat <- read.smartseq2.bams(files,"data/genes.refFlat",n.cores=40)
+```
+
+(instead, we read in the resulting structure from the rds file)
+```{r}
+dat <- readRDS(url("http://pklab.med.harvard.edu/velocyto/chromaffin/dat.rds"))
+```
+
+Read in cell cluster assignment and tSNE embedding used in the Furlan et al. (Science'17).
+```{r}
+cell.colors <- readRDS(url("http://pklab.med.harvard.edu/velocyto/chromaffin/cell.colors.rds"))
+emb <- readRDS(url("http://pklab.med.harvard.edu/velocyto/chromaffin/embedding.rds"))
+```
+
+## Gene filtering
+Spliced expression magnitude distribution across genes:
+```{r}
+hist(log10(rowSums(dat$emat)+1),col='wheat',xlab='log10[ number of reads + 1]',main='number of reads per gene')
+```
+
+
+Set up expression matrices, filtering genes to leave those that exceed some pre-defined g to the average expression magnitude
+```{r}
+# exonic read (spliced) expression matrix
+emat <- dat$emat;
+# intronic read (unspliced) expression matrix
+nmat <- dat$iomat;
+# spanning read (intron+exon) expression matrix
+smat <- dat$smat;
+# filter expression matrices based on some minimum max-cluster averages
+emat <- filter.genes.by.cluster.expression(emat,cell.colors,min.max.cluster.average = 5)
+nmat <- filter.genes.by.cluster.expression(nmat,cell.colors,min.max.cluster.average = 1)
+smat <- filter.genes.by.cluster.expression(smat,cell.colors,min.max.cluster.average = 0.5)
+
+# look at the resulting gene set
+str(intersect(intersect(rownames(emat),rownames(nmat)),rownames(smat)))
+
+```
+
+## Several variants of velocity estimates using gene-relative model
+
+We'll start with what is perhaps the most robust estimate, that combines cell kNN pooling with the gamma fit based on an extreme quantiles:
+
+Using min/max quantile fit, in which case gene-specific offsets do not require spanning read (smat) fit.
+Here the fit is based on the top/bottom 2% of cells (by spliced expression magnitude)
+```{r}
+rvel.qf <- gene.relative.velocity.estimates(emat,nmat,deltaT=1,kCells = 5,fit.quantile = 0.02)
+```
+
+We visualize the velocities by projecting observed and extrapolated cells onto the first 5 PCs:
+```{r fig.width=8, fig.height=8}
+pca.velocity.plot(rvel.qf,nPcs=5,plot.cols=2,cell.colors=ac(cell.colors,alpha=0.7),cex=1.2,pcount=0.1,pc.multipliers=c(1,-1,-1,-1,-1))
+```
+
+
+Fitting of individual genes can be visualized using "show.gene" option. To save time, we'll pass previously-calculated velocity (rvel.qf) to save calculation time:
+```{r fig.width=8,fig.height=2.2}
+# define custom pallet for expression magnitude
+gene.relative.velocity.estimates(emat,nmat,deltaT=1,kCells = 5,fit.quantile = 0.02,old.fit=rvel.qf,show.gene='Chga',cell.emb=emb,cell.colors=cell.colors)
+```
+
+
+
+
+
+Alternatively, we calculate gene-relative velocity, using k=5 cell kNN pooling, but now using entire range of expression to determine slope gamma, and using spanning reads (smat) to fit the gene offsets.
+```{r}
+rvel <- gene.relative.velocity.estimates(emat,nmat,smat=smat,deltaT=1,kCells = 5, min.nmat.emat.slope = 0.1, min.nmat.smat.correlation = 0.1)
+```
+
+We can visualize the velocity in PCA space:
+```{r fig.width=8, fig.height=8}
+pca.velocity.plot(rvel,nPcs=5,plot.cols=2,cell.colors=ac(cell.colors,alpha=0.7),cex=1.2,pcount=0.1,pc.multipliers=c(1,-1,1,1,1))
+```
+
+Here we calculate the most basic version of velocity estimates, using relative gamma fit, without cell kNN smoothing:
+```{r}
+rvel1 <- gene.relative.velocity.estimates(emat,nmat,deltaT=1,deltaT2 = 1,kCells = 1)
+```
+
+```{r fig.width=8, fig.height=8}
+pca.velocity.plot(rvel1,nPcs=5,plot.cols=2,cell.colors=ac(cell.colors,alpha=0.7),cex=1.2,pcount=0.1,pc.multipliers=c(1,-1,1,1,1))
+```
+
+
+
+## Velocity estimate based on gene structure
+
+Genome-wide model fit:
+```{r}
+# start with unfiltered matrices, as we can use more genes in these types of estimates
+emat <- dat$emat; nmat <- dat$iomat; smat <- dat$smat;
+emat <- filter.genes.by.cluster.expression(emat,cell.colors,min.max.cluster.average = 7)
+gvel <- global.velcoity.estimates(emat, nmat, rvel, dat$base.df, smat=smat, deltaT=1, kCells=5, kGenes = 15, kGenes.trim = 5, min.gene.cells = 0, min.gene.conuts = 500)
+```
+
+
+```{r fig.width=8, fig.height=8}
+pca.velocity.plot(gvel,nPcs=5,plot.cols=2,cell.colors=ac(cell.colors,alpha=0.7),cex=1.2,pcount=0.1,pc.multipliers=c(1,-1,-1,1,1))
+```
+
+
+
+
+Or in tSNE space
+```{r fig.width=10, fig.height=5}
+#pdf(file='tsne.shift.plots.pdf',height=6,width=12)
+par(mfrow=c(1,2), mar = c(2.5,2.5,2.5,1.5), mgp = c(2,0.65,0), cex = 0.85);
+x <- tSNE.velocity.plot(rvel,nPcs=15,cell.colors=cell.colors,cex=0.9,perplexity=200,norm.nPcs=NA,pcount=0.1,scale='log',do.par=F)
+x <- tSNE.velocity.plot(gvel,nPcs=15,cell.colors=cell.colors,cex=0.9,perplexity=200,norm.nPcs=NA,pcount=0.1,scale='log',do.par=F)
+#dev.off()
+
+```
+
+
+## Visualization on an existing embedding
+
+Here we use t-SNE embedding from the original publication (in emb variable).
+
+```{r fig.width=7, fig.height=5}
+vel <- rvel; arrow.scale=6; cell.alpha=0.4; cell.cex=1; fig.height=4; fig.width=4.5;
+show.velocity.on.embedding.cor(emb,vel,n=100,scale='sqrt',cell.colors=ac(cell.colors,alpha=cell.alpha),cex=cell.cex,arrow.scale=arrow.scale,arrow.lwd=1)
+```
+
+Alternatively, the same function can be used to calculate a velocity vector field:
+```{r fig.width=7, fig.height=5}
+show.velocity.on.embedding.cor(emb,vel,n=100,scale='sqrt',cell.colors=ac(cell.colors,alpha=cell.alpha),cex=cell.cex,arrow.scale=arrow.scale,show.grid.flow=TRUE,min.grid.cell.mass=0.5,grid.n=20,arrow.lwd=2)
+```
+
+
+## Diffusion modeling
+A similar function can be used to model central trajectories by directed diffusion on embedding. 
+The main parameters are set up by sigma (which limits the range of how far a cell can jump in terms of distance) and n (how many nearest neighbors are being considered for jumps). The results are sensitive to these parameters, as we don't have a good way of assessing how much the directional velocity component should compare with random Brownian motion of a cell with the manifold. For instance, relaxing (increasing) sigma, in particular will eventually lead to sympathoblast cells "jumping" the gap into the into the chromaffin differentiation part.
+
+Warning: this simulation takes some time (e.g. a couple of minutes on 40 cores).
+
+```{r fig.width=7, fig.height=5}
+x <- show.velocity.on.embedding.eu(emb,vel,n=40,scale='sqrt',cell.colors=ac(cell.colors,alpha=cell.alpha),cex=cell.cex,nPcs=30,sigma=2.5,show.trajectories=TRUE,diffusion.steps=500,n.trajectory.clusters=8,ntop.trajectories=1,embedding.knn=T,control.for.neighborhood.density=TRUE,n.cores=40) 
+```
+
