@@ -3,7 +3,7 @@ title: "Estimation on 10x data using loom and pagoda2"
 output: html_notebook
 ---
 
-Here we show an example of how (loom-annotated)[http://velocyto.org/velocyto.py/tutorial/index.html#running-the-cli] matrices of a 10x dataset can be loaded and analyzed in R using velocyto.R and (pagoda2)[https://github.com/hms-dbmi/pagoda2].
+Here we show an example of how [loom-annotated](http://velocyto.org/velocyto.py/tutorial/index.html#running-the-cli) matrices of a 10x dataset can be loaded and analyzed in R using velocyto.R and [pagoda2](https://github.com/hms-dbmi/pagoda2).
 
 
 ## Data loading
@@ -31,7 +31,7 @@ emat <- emat[,colSums(emat)>=1e3]
 
 ## Pagoda2 processing
 
-(Pagoda2)[https://github.com/hms-dbmi/pagoda2] is used to generate cell embedding, cell clustering, as well as a more accurate cell-cell distance matrix. You can alternatively generate those using other tools, such as Seurat2, etc.
+[Pagoda2](https://github.com/hms-dbmi/pagoda2) is used to generate cell embedding, cell clustering, as well as a more accurate cell-cell distance matrix. You can alternatively generate those using other tools, such as Seurat2, etc.
 
 Create pagoda2 object, adjust variance:
 ```{r fig.height=3,fig.width=6}
