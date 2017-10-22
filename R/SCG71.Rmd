@@ -1,0 +1,119 @@
+---
+title: "Mouse BM example, using dropEst and pagoda2"
+output: html_notebook
+---
+
+There are two options for annotating unspliced/spliced molecules for velocyto: 
+1. Using velocyto.py [loom files](http://velocyto.org/velocyto.py/tutorial/index.html#running-the-cli)
+2. Using [dropEst output](https://github.com/hms-dbmi/dropEst)
+
+Here we show how to load dropEst output matrices. We then use [pagoda2](https://github.com/hms-dbmi/pagoda2) to obtain cell clusters/embedding, and then estimate/visualize velocity.
+
+
+## Data loading
+
+`dropEst` includes `-V` option that writes out an additional file called `cell.counts.matrices.rds`, which contains separate matrices for three types of reads:
+1. exonic - those molecules whose reads are all mapping to exonic regions
+2. intronic - those molecules whose reads are all mapping to intronic regions
+3. spanning - those molecules whose reads span both intronic and exonic regions of a gene
+
+Here's the example `dropEst` command that was ran for to generate these:
+`~/dropEst/dropest -V -C 6000 -m -g ~/dropEst/data/gtf/refflat_ucsc_mm10_exons.gtf.gz -c ~/dropEst/configs/indrop_v3.xml ~/inDropDatasets/20170409-Guo-SUB05381/04-indropEst/SCG_71_C2.*.aligned.bam`
+
+Load matrix rds file:
+```{r}
+dat <- readRDS(url("http://pklab.med.harvard.edu/velocyto/mouseBM/cell.counts.matrices.rds"))
+```
+
+Load the velocyto package:
+```{r}
+library(velocyto.R)
+```
+
+
+## Normalize and cluster cells using pagoda2
+Using spliced expression matrix as input to pagoda2.
+```{r}
+emat <- dat$exon
+hist(log10(colSums(emat)),col='wheat',xlab='cell size')
+
+# this dataset has already been pre-filtered, but this is where one woudl do some filtering
+emat <- emat[,colSums(emat)>=1e3]
+```
+
+## Pagoda2 processing
+
+[Pagoda2](https://github.com/hms-dbmi/pagoda2) is used to generate cell embedding, cell clustering, as well as a more accurate cell-cell distance matrix. You can alternatively generate those using other tools, such as Seurat2, etc.
+
+Create pagoda2 object, adjust variance:
+```{r fig.height=3,fig.width=6}
+library(pagoda2)
+r <- Pagoda2$new(emat,modelType='plain',trim=10,log.scale=T)
+r$adjustVariance(plot=T,do.par=T,gam.k=10)
+```
+
+Run basic analysis steps to generate cell embedding and clustering, visualize:
+```{r}
+r$calculatePcaReduction(nPcs=100,n.odgenes=3e3,maxit=300)
+r$makeKnnGraph(k=30,type='PCA',center=T,distance='cosine');
+r$getKnnClusters(method=multilevel.community,type='PCA',name='multilevel')
+r$getEmbedding(type='PCA',embeddingType='tSNE',perplexity=50,verbose=T)
+```
+
+Plot embedding, labeling clusters (left) and "Xist" expression (which separates the male and female )
+```{r fig.height=4,fig.width=8}
+par(mfrow=c(1,2))
+r$plotEmbedding(type='PCA',embeddingType='tSNE',show.legend=F,mark.clusters=T,min.group.size=10,shuffle.colors=F,mark.cluster.cex=1,alpha=0.3,main='cell clusters')
+r$plotEmbedding(type='PCA',embeddingType='tSNE',colors=r$depth,main='depth')  
+
+```
+
+## Velocity estimation
+
+Prepare matrices and clustering data:
+```{r}
+emat <- dat$exon; nmat <- dat$intron; # disregarding spanning reads, as there are too few of them
+emat <- emat[,rownames(r$counts)]; nmat <- nmat[,rownames(r$counts)]; # restrict to cells that passed p2 filter
+# take cluster labels
+cluster.label <- r$clusters$PCA$multilevel # take the cluster factor that was calculated by p2
+cell.colors <- pagoda2:::fac2col(cluster.label)
+# take embedding form p2
+emb <- r$embeddings$PCA$tSNE
+```
+
+
+In addition to clustering and the t-SNE embedding, from the p2 processing we will also take a cell-cell distance, which will be better than the default whole-transcriptome correlation distance that velocyto.R would normally use.
+```{r}
+cell.dist <- as.dist(1-armaCor(t(r$reductions$PCA)))
+```
+
+Filter genes based on the minimum average expresion magnitude (in at least one of the clusters), output total number of resulting valid genes:
+```{r}
+emat <- filter.genes.by.cluster.expression(emat,cluster.label,min.max.cluster.average = 0.2)
+nmat <- filter.genes.by.cluster.expression(nmat,cluster.label,min.max.cluster.average = 0.05)
+length(intersect(rownames(emat),rownames(emat)))
+```
+
+Estimate RNA velocity (using gene-relative model with k=20 cell kNN pooling and using top/bottom 2% quantiles for gamma fit):
+```{r}
+fit.quantile <- 0.02
+rvel.cd <- gene.relative.velocity.estimates(emat,nmat,deltaT=1,kCells=25,cell.dist=cell.dist,fit.quantile=fit.quantile)
+```
+
+
+Visualize velocity on the t-SNE embedding, using velocity vector fields:
+```{r fig.height=8,fig.width=8}
+show.velocity.on.embedding.cor(emb,rvel.cd,n=200,scale='sqrt',cell.colors=ac(cell.colors,alpha=0.5),cex=0.8,arrow.scale=3,show.grid.flow=TRUE,min.grid.cell.mass=0.5,grid.n=40,arrow.lwd=1,do.par=F,cell.border.alpha = 0.1)
+```
+
+
+Visualize a fit for a particular gene (we reuse rvel.cd to save on calcualtions here):
+```{r fig.height=2.5,fig.width=9}
+gene <- "Camp"
+gene.relative.velocity.estimates(emat,nmat,deltaT=1,kCells = 25,kGenes=1,fit.quantile=fit.quantile,cell.emb=emb,cell.colors=cell.colors,cell.dist=cell.dist,show.gene=gene,old.fit=rvel.cd,do.par=T)
+```
+Increase neighborhood size, which should give us a more idealistic view of the phase portraits, particularly when it comes to the main, macrophage differentiation streak:
+```{r fig.height=2.5,fig.width=9}
+gene <- "Camp"
+gene.relative.velocity.estimates(emat,nmat,deltaT=1,kCells = 100,kGenes=1,fit.quantile=fit.quantile,cell.emb=emb,cell.colors=cell.colors,cell.dist=cell.dist,show.gene=gene,do.par=T)
+```

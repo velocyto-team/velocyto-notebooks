@@ -114,7 +114,7 @@ pca.velocity.plot(rvel1,nPcs=5,plot.cols=2,cell.colors=ac(cell.colors,alpha=0.7)
 ## Velocity estimate based on gene structure
 
 Genome-wide model fit:
-```{r}
+```{r warning=FALSE}
 # start with unfiltered matrices, as we can use more genes in these types of estimates
 emat <- dat$emat; nmat <- dat$iomat; smat <- dat$smat;
 emat <- filter.genes.by.cluster.expression(emat,cell.colors,min.max.cluster.average = 7)
@@ -155,13 +155,14 @@ show.velocity.on.embedding.cor(emb,vel,n=100,scale='sqrt',cell.colors=ac(cell.co
 ```
 
 
-## Diffusion modeling
+## Cell trajectory modeling
 A similar function can be used to model central trajectories by directed diffusion on embedding. 
 The main parameters are set up by sigma (which limits the range of how far a cell can jump in terms of distance) and n (how many nearest neighbors are being considered for jumps). The results are sensitive to these parameters, as we don't have a good way of assessing how much the directional velocity component should compare with random Brownian motion of a cell with the manifold. For instance, relaxing (increasing) sigma, in particular will eventually lead to sympathoblast cells "jumping" the gap into the into the chromaffin differentiation part.
 
 Warning: this simulation takes some time (e.g. a couple of minutes on 40 cores).
 
 ```{r fig.width=7, fig.height=5}
-x <- show.velocity.on.embedding.eu(emb,vel,n=40,scale='sqrt',cell.colors=ac(cell.colors,alpha=cell.alpha),cex=cell.cex,nPcs=30,sigma=2.5,show.trajectories=TRUE,diffusion.steps=500,n.trajectory.clusters=8,ntop.trajectories=1,embedding.knn=T,control.for.neighborhood.density=TRUE,n.cores=40) 
+x <- show.velocity.on.embedding.eu(emb,vel,n=40,scale='sqrt',cell.colors=ac(cell.colors,alpha=cell.alpha),cex=cell.cex,nPcs=30,sigma=2.5,show.trajectories=TRUE,diffusion.steps=500,n.trajectory.clusters=15,ntop.trajectories=1,embedding.knn=T,control.for.neighborhood.density=TRUE,n.cores=40) 
+
 ```
 

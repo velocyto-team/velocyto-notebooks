@@ -100,4 +100,3 @@ Visualize a fit for a particular gene (we reuse rvel.cd to save on calcualtions 
 gene <- "Nfib"
 gene.relative.velocity.estimates(emat,nmat,deltaT=1,kCells = 20,kGenes=1,fit.quantile=fit.quantile,cell.emb=emb,cell.colors=cell.colors,cell.dist=cell.dist,show.gene=gene,old.fit=rvel.cd,do.par=T)
 ```
-
